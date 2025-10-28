@@ -1,5 +1,7 @@
 #!/usr/bin/env ts-node
 
+import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers';
 import { google } from '@ai-sdk/google';
 import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
@@ -7,6 +9,8 @@ import { generateText } from 'ai';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as toml from 'toml';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
@@ -20,7 +24,24 @@ interface Config {
   };
 }
 
-async function main() {
+// Define the structure for MCP server configuration
+interface McpServer {
+    command: string;
+    args: string[];
+    description: string;
+}
+
+interface McpConfig {
+    [key: string]: McpServer;
+}
+
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const mcpConfigPath = path.join(__dirname, '.mcp-servers.json');
+
+
+async function handlePrompt(prompt: string) {
   try {
     // Read and parse the config.toml file
     const configContent = fs.readFileSync('./config.toml', 'utf-8');
@@ -30,7 +51,7 @@ async function main() {
     const providerName = config.provider;
     const providerConfig = config.providers[providerName];
 
-    if (!providerConfig || !providerConfig.api_key) {
+    if (!providerConfig || !providerConfig.api_key || providerConfig.api_key.startsWith('YOUR')) {
       console.error(`API key for provider "${providerName}" is not configured in config.toml`);
       return;
     }
@@ -52,13 +73,6 @@ async function main() {
         return;
     }
 
-    // Get the prompt from the command line arguments
-    const prompt = process.argv.slice(2).join(' ');
-    if (!prompt) {
-      console.error('Please provide a prompt.');
-      return;
-    }
-
     // Generate text using the selected model
     const { text } = await generateText({
       model,
@@ -68,11 +82,75 @@ async function main() {
     console.log(text);
   } catch (error) {
     if (error instanceof Error) {
-      console.error(error.message);
+        if (error.message.includes('file not found')) {
+            console.error('Error: config.toml not found. Please create the file and add your API keys.');
+        } else {
+            console.error(error.message);
+        }
     } else {
       console.error('An unknown error occurred.');
     }
   }
 }
 
-main();
+function getMcpServers(): McpConfig {
+    if (!fs.existsSync(mcpConfigPath)) {
+        return {};
+    }
+    const content = fs.readFileSync(mcpConfigPath, 'utf-8');
+    return JSON.parse(content);
+}
+
+function saveMcpServers(servers: McpConfig) {
+    fs.writeFileSync(mcpConfigPath, JSON.stringify(servers, null, 2));
+}
+
+yargs(hideBin(process.argv))
+  .command(
+    '$0 <prompt...>',
+    'Generate text using the configured AI provider.',
+    (yargs) => {
+      return yargs.positional('prompt', {
+        describe: 'The prompt to send to the AI',
+        type: 'string',
+        demandOption: true,
+      });
+    },
+    (argv) => {
+      handlePrompt(argv.prompt.join(' '));
+    }
+  )
+  .command('mcp <command> [args...]', 'Manage MCP servers.', (yargs) => {
+    yargs
+      .command('add <name> <command> [args...]', 'Add a new MCP server.', {}, (argv) => {
+          const servers = getMcpServers();
+          servers[argv.name as string] = {
+              command: argv.command as string,
+              args: argv.args as string[],
+              description: '', // You can add a way to provide a description
+          };
+          saveMcpServers(servers);
+          console.log(`MCP server "${argv.name}" added.`);
+      })
+      .command('list', 'List all configured MCP servers.', {}, () => {
+          const servers = getMcpServers();
+          console.log('Configured MCP servers:');
+          for (const name in servers) {
+              console.log(`- ${name}`);
+          }
+      })
+      .command('remove <name>', 'Remove an MCP server.', {}, (argv) => {
+            const servers = getMcpServers();
+            if (servers[argv.name as string]) {
+                delete servers[argv.name as string];
+                saveMcpServers(servers);
+                console.log(`MCP server "${argv.name}" removed.`);
+            } else {
+                console.error(`MCP server "${argv.name}" not found.`);
+            }
+      })
+      .demandCommand(1, 'You need at least one command before moving on.')
+      .help();
+  })
+  .help()
+  .argv;
