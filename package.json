@@ -16,7 +16,8 @@
   "dependencies": {
     "@ai-sdk/google": "^2.0.24",
     "ai": "^5.0.81",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "toml": "^3.0.0"
   },
   "devDependencies": {
     "ts-node": "^10.9.2",
