@@ -1,8 +1,47 @@
 import { google } from '@ai-sdk/google';
 import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
-import { generateText } from 'ai';
+import { generateText, tool } from 'ai';
 import { getConfig } from '../lib/config.ts';
+import { getMcpServers } from './mcp.ts';
+import { z } from 'zod';
+import { spawn } from 'child_process';
+
+async function executeTool(toolName: string, args: readonly any[]): Promise<string> {
+    const servers = getMcpServers();
+    const server = servers[toolName];
+
+    if (!server) {
+        return `Tool "${toolName}" not found.`;
+    }
+
+    return new Promise((resolve) => {
+        const child = spawn(server.command, [...server.args, ...args.map(String)]);
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (data) => {
+            stdout += data;
+        });
+
+        child.stderr.on('data', (data) => {
+            stderr += data;
+        });
+
+        child.on('close', (code) => {
+            if (code !== 0) {
+                resolve(`Tool "${toolName}" exited with code ${code}:\n${stderr}`);
+            } else {
+                resolve(stdout);
+            }
+        });
+
+        child.on('error', (err) => {
+            resolve(`Failed to start tool "${toolName}": ${err.message}`);
+        });
+    });
+}
+
 
 export async function handlePrompt(prompt: string) {
   try {
@@ -31,12 +70,52 @@ export async function handlePrompt(prompt: string) {
         return;
     }
 
-    const { text } = await generateText({
-      model,
-      prompt,
-    });
+    const mcpServers = getMcpServers();
+    const tools:any = {};
+    for (const serverName in mcpServers) {
+        tools[serverName] = tool({
+            description: mcpServers[serverName].description,
+            parameters: z.object({
+                args: z.string().describe('A string of arguments to pass to the command'),
+            }),
+            execute: async ({ args }: { args: string }) => {
+                return await executeTool(serverName, args.split(' '));
+            }
+        })
+    }
 
-    console.log(text);
+    const messages = [{ role: 'user' as const, content: prompt }];
+
+    for (let i = 0; i < 5; i++) { // Loop to allow for multiple tool calls
+        const { text, toolCalls } = await generateText({
+            model,
+            messages: messages,
+            tools
+        });
+
+        if (toolCalls && toolCalls.length > 0) {
+            messages.push({
+                role: 'assistant',
+                content: '',
+                toolCalls: toolCalls
+            });
+
+            for (const toolCall of toolCalls) {
+                const result = await toolCall.execute();
+                messages.push({
+                    role: 'tool',
+                    toolCallId: toolCall.toolCallId,
+                    content: result
+                });
+            }
+        } else {
+            console.log(text);
+            return;
+        }
+    }
+    console.log("Loop limit reached. The AI may be stuck in a tool-calling loop.");
+
+
   } catch (error) {
     if (error instanceof Error) {
         if (error.message.includes('file not found')) {
