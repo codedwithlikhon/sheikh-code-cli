@@ -16,7 +16,7 @@ interface McpConfig {
     [key: string]: McpServer;
 }
 
-export function getMcpServers(): McpConfig {
+export export function getMcpServers(): McpConfig {
     if (!fs.existsSync(mcpConfigPath)) {
         return {};
     }
