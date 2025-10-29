@@ -1,1 +1,7 @@
-{}
+{
+  "list-files": {
+    "command": "ls",
+    "args": [],
+    "description": ""
+  }
+}

@@ -1,47 +1,47 @@
 import { google } from '@ai-sdk/google';
 import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
-import { generateText, tool } from 'ai';
+import { generateText } from 'ai';
 import { getConfig } from '../lib/config.ts';
 import { getMcpServers } from './mcp.ts';
-import { z } from 'zod';
 import { spawn } from 'child_process';
 
-async function executeTool(toolName: string, args: readonly any[]): Promise<string> {
+async function executeTool(toolName: string, args: string[]): Promise<string> {
     const servers = getMcpServers();
     const server = servers[toolName];
 
     if (!server) {
-        return `Tool "${toolName}" not found.`;
+        return `Error: Tool "${toolName}" not found.`;
     }
 
     return new Promise((resolve) => {
-        const child = spawn(server.command, [...server.args, ...args.map(String)]);
+        const child = spawn(server.command, [...server.args, ...args]);
         let stdout = '';
         let stderr = '';
-
-        child.stdout.on('data', (data) => {
-            stdout += data;
-        });
-
-        child.stderr.on('data', (data) => {
-            stderr += data;
-        });
-
+        child.stdout.on('data', (data) => (stdout += data));
+        child.stderr.on('data', (data) => (stderr += data));
         child.on('close', (code) => {
             if (code !== 0) {
-                resolve(`Tool "${toolName}" exited with code ${code}:\n${stderr}`);
+                resolve(`Error: Tool "${toolName}" exited with code ${code}:\n${stderr}`);
             } else {
                 resolve(stdout);
             }
         });
-
         child.on('error', (err) => {
-            resolve(`Failed to start tool "${toolName}": ${err.message}`);
+            resolve(`Error: Failed to start tool "${toolName}": ${err.message}`);
         });
     });
 }
 
+function buildSystemPrompt(): string {
+    const servers = getMcpServers();
+    let prompt = "You are a helpful assistant that can use tools. To use a tool, you must respond with ONLY a JSON object in the format: {\"tool\": \"tool_name\", \"args\": \"arguments_as_a_string\"}. Do not add any other text, explanation, or formatting. Your response must be a valid JSON object and nothing else.\n\nYour available tools are:\n";
+    for (const name in servers) {
+        prompt += `- tool: ${name}, description: ${servers[name].description}\n`;
+    }
+    prompt += "\nChoose one of the tools listed above.";
+    return prompt;
+}
 
 export async function handlePrompt(prompt: string) {
   try {
@@ -70,51 +70,35 @@ export async function handlePrompt(prompt: string) {
         return;
     }
 
-    const mcpServers = getMcpServers();
-    const tools:any = {};
-    for (const serverName in mcpServers) {
-        tools[serverName] = tool({
-            description: mcpServers[serverName].description,
-            parameters: z.object({
-                args: z.string().describe('A string of arguments to pass to the command'),
-            }),
-            execute: async ({ args }: { args: string }) => {
-                return await executeTool(serverName, args.split(' '));
-            }
-        })
-    }
+    const systemPrompt = buildSystemPrompt();
+    
+    // First call to the AI
+    let { text } = await generateText({
+        model,
+        system: systemPrompt,
+        prompt,
+    });
 
-    const messages = [{ role: 'user' as const, content: prompt }];
-
-    for (let i = 0; i < 5; i++) { // Loop to allow for multiple tool calls
-        const { text, toolCalls } = await generateText({
-            model,
-            messages: messages,
-            tools
-        });
-
-        if (toolCalls && toolCalls.length > 0) {
-            messages.push({
-                role: 'assistant',
-                content: '',
-                toolCalls: toolCalls
+    try {
+        const toolCall = JSON.parse(text);
+        if (toolCall.tool && toolCall.args) {
+            console.log(`AI wants to run tool "${toolCall.tool}" with args "${toolCall.args}"`);
+            const toolResult = await executeTool(toolCall.tool, toolCall.args.split(' '));
+            
+            // Second call to the AI with the tool's result
+            const finalResult = await generateText({
+                model,
+                prompt: `The user asked: "${prompt}". I ran the tool "${toolCall.tool}" and got this result:\n\n${toolResult}\n\nPlease summarize this result for the user.`,
             });
 
-            for (const toolCall of toolCalls) {
-                const result = await toolCall.execute();
-                messages.push({
-                    role: 'tool',
-                    toolCallId: toolCall.toolCallId,
-                    content: result
-                });
-            }
-        } else {
-            console.log(text);
+            console.log(finalResult.text);
             return;
         }
+    } catch (e) {
+        // Not a JSON tool call, so just print the text
     }
-    console.log("Loop limit reached. The AI may be stuck in a tool-calling loop.");
 
+    console.log(text);
 
   } catch (error) {
     if (error instanceof Error) {
