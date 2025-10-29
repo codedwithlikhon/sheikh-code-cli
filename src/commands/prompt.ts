@@ -1,7 +1,4 @@
-import { google } from '@ai-sdk/google';
-import { openai } from '@ai-sdk/openai';
-import { anthropic } from '@ai-sdk/anthropic';
-import { generateText } from 'ai';
+import { OpenAI } from 'openai';
 import { getConfig } from '../lib/config.ts';
 import { getMcpServers } from './mcp.ts';
 import { spawn } from 'child_process';
@@ -39,7 +36,7 @@ function buildSystemPrompt(): string {
     for (const name in servers) {
         prompt += `- tool: ${name}, description: ${servers[name].description}\n`;
     }
-    prompt += "\nChoose one of the tools listed above.";
+    prompt += "\nChoose one of the tools listed above if applicable.";
     return prompt;
 }
 
@@ -53,52 +50,55 @@ export async function handlePrompt(prompt: string) {
       console.error(`API key for provider "${providerName}" is not configured in config.toml`);
       return;
     }
-
-    let model;
-    switch (providerName) {
-      case 'google':
-        model = google('gemini-2.5-flash', { apiKey: providerConfig.api_key });
-        break;
-      case 'openai':
-        model = openai('gpt-4', { apiKey: providerConfig.api_key });
-        break;
-      case 'anthropic':
-        model = anthropic('claude-3-opus-20240229', { apiKey: providerConfig.api_key });
-        break;
-      default:
-        console.error(`Unsupported provider: ${providerName}`);
+    if (!providerConfig.base_url) {
+        console.error(`base_url for provider "${providerName}" is not configured in config.toml`);
         return;
     }
 
-    const systemPrompt = buildSystemPrompt();
-    
-    // First call to the AI
-    let { text } = await generateText({
-        model,
-        system: systemPrompt,
-        prompt,
+    const openai = new OpenAI({
+        apiKey: providerConfig.api_key,
+        baseURL: providerConfig.base_url,
     });
 
+    const systemPrompt = buildSystemPrompt();
+    
+    const response = await openai.chat.completions.create({
+        model: 'gemini-2.5-flash', // This will need to be configurable later
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt }
+        ],
+    });
+
+    let message = response.choices[0].message.content || '';
+
+    // Strip markdown code block if present
+    if (message.startsWith('```json')) {
+        message = message.substring(7, message.length - 3).trim();
+    }
+
     try {
-        const toolCall = JSON.parse(text);
-        if (toolCall.tool && toolCall.args) {
-            console.log(`AI wants to run tool "${toolCall.tool}" with args "${toolCall.args}"`);
-            const toolResult = await executeTool(toolCall.tool, toolCall.args.split(' '));
+        const toolCall = JSON.parse(message);
+        if (toolCall.tool && typeof toolCall.args === 'string') {
+            const args = toolCall.args.split(' ').filter(arg => arg.length > 0);
+            const toolResult = await executeTool(toolCall.tool, args);
             
-            // Second call to the AI with the tool's result
-            const finalResult = await generateText({
-                model,
-                prompt: `The user asked: "${prompt}". I ran the tool "${toolCall.tool}" and got this result:\n\n${toolResult}\n\nPlease summarize this result for the user.`,
+            const finalResponse = await openai.chat.completions.create({
+                model: 'gemini-2.5-flash',
+                messages: [
+                    { role: 'system', content: "You are a helpful assistant. Summarize the result of the tool call for the user." },
+                    { role: 'user', content: `The user's original prompt was: "${prompt}". I ran the tool "${toolCall.tool}" and got this result:\n\n${toolResult}` }
+                ],
             });
 
-            console.log(finalResult.text);
+            console.log(finalResponse.choices[0].message.content);
             return;
         }
     } catch (e) {
         // Not a JSON tool call, so just print the text
     }
 
-    console.log(text);
+    console.log(message);
 
   } catch (error) {
     if (error instanceof Error) {
