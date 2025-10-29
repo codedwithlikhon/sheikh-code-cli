@@ -8,7 +8,7 @@ Gemini 2.5 is Google's most advanced model family to date, offering exceptional 
 
 ## Getting Started with the AI SDK
 
-The AI SDK is the TypeScript toolkit designed to help developers build AI-powered applications with React, Next.js, Vue, Svelte, Node.js, and more. Integrating LLMs into applications is complicated and heavily dependent on the specific model provider you use.
+The AI SDK is the TypeScript toolkit designed to help developers build AI-powered applications with React, Next.js, Vue, Svelte, Node.js, and more. This CLI is a demonstration of its capabilities, allowing you to interact with different AI providers like Google, OpenAI, and MiniMax.
 
 The AI SDK abstracts away the differences between model providers, eliminates boilerplate code for building chatbots, and allows you to go beyond text output to generate rich, interactive components.
 

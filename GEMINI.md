@@ -20,7 +20,7 @@ This project is an open-source command-line interface (CLI) that uses the AI SDK
 
 1.  **Configure the AI provider:**
     *   Open the `config.toml` file.
-    *   Set the `provider` to your desired AI provider (e.g., "google", "openai").
+    *   Set the `provider` to your desired AI provider (e.g., "google", "openai", "minimax").
     *   Add your API key for the selected provider in the corresponding section.
 
 2.  **Run the CLI:**

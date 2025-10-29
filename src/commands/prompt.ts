@@ -55,6 +55,26 @@ export async function handlePrompt(prompt: string) {
         return;
     }
 
+    let modelName: string;
+    switch (providerName) {
+      case 'google':
+        modelName = 'gemini-2.5-flash';
+        break;
+      case 'openai':
+        modelName = 'gpt-4';
+        break;
+      case 'minimax':
+        modelName = 'MiniMax-M2';
+        break;
+      case 'anthropic':
+        // Anthropic is not yet supported with this implementation
+        console.error(`Unsupported provider: ${providerName}`);
+        return;
+      default:
+        console.error(`Unsupported provider: ${providerName}`);
+        return;
+    }
+
     const openai = new OpenAI({
         apiKey: providerConfig.api_key,
         baseURL: providerConfig.base_url,
@@ -63,7 +83,7 @@ export async function handlePrompt(prompt: string) {
     const systemPrompt = buildSystemPrompt();
     
     const response = await openai.chat.completions.create({
-        model: 'gemini-2.5-flash', // This will need to be configurable later
+        model: modelName,
         messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: prompt }
