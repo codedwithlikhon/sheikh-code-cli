@@ -12,10 +12,14 @@ yargs(hideBin(process.argv))
         describe: 'The prompt to send to the AI',
         type: 'string',
         demandOption: true,
+      }).option('no-think', {
+        type: 'boolean',
+        description: 'Suppress the thinking process output',
+        default: false,
       });
     },
     (argv) => {
-      handlePrompt(argv.prompt.join(' '));
+      handlePrompt(argv.prompt.join(' '), { showThinking: !argv.noThink });
     }
   )
   .command('mcp <command> [args...]', 'Manage MCP servers.', (yargs) => {

@@ -40,7 +40,7 @@ function buildSystemPrompt(): string {
     return prompt;
 }
 
-export async function handlePrompt(prompt: string) {
+export async function handlePrompt(prompt: string, options: { showThinking: boolean }) {
   try {
     const config = getConfig();
     const providerName = config.provider;
@@ -54,6 +54,11 @@ export async function handlePrompt(prompt: string) {
         console.error(`base_url for provider "${providerName}" is not configured in config.toml`);
         return;
     }
+
+    const openai = new OpenAI({
+        apiKey: providerConfig.api_key,
+        baseURL: providerConfig.base_url,
+    });
 
     let modelName: string;
     switch (providerName) {
@@ -75,11 +80,6 @@ export async function handlePrompt(prompt: string) {
         return;
     }
 
-    const openai = new OpenAI({
-        apiKey: providerConfig.api_key,
-        baseURL: providerConfig.base_url,
-    });
-
     const systemPrompt = buildSystemPrompt();
     
     const response = await openai.chat.completions.create({
@@ -91,6 +91,17 @@ export async function handlePrompt(prompt: string) {
     });
 
     let message = response.choices[0].message.content || '';
+
+    // Handle thinking process
+    if (options.showThinking) {
+        const thinkRegex = /<think>([\s\S]*?)<\/think>/;
+        const match = message.match(thinkRegex);
+        if (match) {
+            console.log("Thinking...\n" + match[1].trim() + "\n");
+            message = message.replace(thinkRegex, '').trim();
+        }
+    }
+
 
     // Strip markdown code block if present
     if (message.startsWith('```json')) {
@@ -104,7 +115,7 @@ export async function handlePrompt(prompt: string) {
             const toolResult = await executeTool(toolCall.tool, args);
             
             const finalResponse = await openai.chat.completions.create({
-                model: 'gemini-2.5-flash',
+                model: modelName,
                 messages: [
                     { role: 'system', content: "You are a helpful assistant. Summarize the result of the tool call for the user." },
                     { role: 'user', content: `The user's original prompt was: "${prompt}". I ran the tool "${toolCall.tool}" and got this result:\n\n${toolResult}` }

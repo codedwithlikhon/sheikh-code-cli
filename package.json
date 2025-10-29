@@ -2,12 +2,15 @@
   "name": "sheikh",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "sheikh": "./index.ts"
+    "sheikh": "./dist/cli.js"
   },
   "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "sheikh": "ts-node src/cli.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
